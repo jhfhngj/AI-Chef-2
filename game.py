@@ -1,0 +1,162 @@
+from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
+import torch
+import random
+
+has = []
+
+def tastertest():
+    a = random.choice(["Judge ", "Chef "])
+    length = random.randint(3, 15)
+    for i in range(length):
+        if i % 2 == 0:
+            a += random.choice("aeiou")
+        else:
+            a += random.choice("bcdfghjklmnpqrstvwxyz")
+    return a
+
+# Load model name
+with open("./config.txt") as f:
+    model_name = f.read().strip()
+
+print("Loading model:", model_name)
+
+device = "cuda" if torch.cuda.is_available() else "cpu"
+
+bnb_config = BitsAndBytesConfig(
+    load_in_4bit=True,
+    bnb_4bit_compute_dtype=torch.float16,
+    bnb_4bit_use_double_quant=True,
+    bnb_4bit_quant_type="nf4"
+)
+
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+tokenizer.pad_token = tokenizer.eos_token
+
+model = AutoModelForCausalLM.from_pretrained(
+    model_name,
+    quantization_config=bnb_config,
+    device_map="auto",
+    torch_dtype=torch.float16
+)
+
+model.eval()
+
+print("Done!")
+
+def run(prompt: str) -> str:
+    inputs = tokenizer(prompt, return_tensors="pt").to(device)
+
+    with torch.no_grad():
+        with torch.cuda.amp.autocast(enabled=(device=="cuda")):
+            output = model.generate(
+                **inputs,
+                max_new_tokens=120,
+                do_sample=True,
+                temperature=0.9,
+                top_p=0.95,
+                pad_token_id=tokenizer.eos_token_id,
+                eos_token_id=tokenizer.eos_token_id
+            )
+
+    return tokenizer.decode(output[0], skip_special_tokens=True)
+
+def choose_ingredients():
+    if not has:
+        print("You have no ingredients yet.")
+        return []
+
+    print("Inventory:")
+    for i, item in enumerate(has, start=1):
+        print(f"{i}. {item}")
+
+    chosen = []
+    while True:
+        to = input("Enter ingredient number to use, or 'done': ").strip().lower()
+        if to == "done":
+            break
+        if not to.isdigit():
+            print("Please enter a valid number or 'done'.")
+            continue
+        idx = int(to)
+        if idx < 1 or idx > len(has):
+            print("Invalid index.")
+            continue
+        chosen.append(has[idx - 1])
+    return chosen
+
+while True:
+    print("\n=== AI Cooking  ===")
+    print("What would you like to do?")
+    print("Buy  -> Get specified ingredients")
+    print("Mix  -> Mix specified ingredients")
+    print("Cook -> Cook specified ingredients")
+    print("Taste -> Let a judge taste your food")
+    print("Other -> Specify a custom one-word command")
+    print("Quit -> Exit game")
+    print("Inventory:", ", ".join(has) if has else "(empty)")
+
+    cmd = input("> ").strip().lower()
+
+    if cmd == "quit":
+        print("Goodbye, Chef.")
+        break
+
+    if cmd == "buy":
+        item = input("What to buy? ").strip()
+        if item:
+            has.append(item)
+            print(f"Bought {item}!")
+        continue
+
+    if cmd in ("mix", "cook", "taste", "other"):
+        if not has:
+            print("You have no ingredients to use.")
+            continue
+
+        if cmd == "other":
+            action = input("Command (one word, e.g. 'freeze', 'blend'): ").strip()
+            if not action:
+                print("No command given.")
+                continue
+        else:
+            action = cmd  # "mix" or "cook"
+
+        tomix = choose_ingredients()
+        if not tomix:
+            print("No ingredients selected.")
+            continue
+
+        if cmd != "taste":
+            todo = f"What would happen if you {action} {', '.join(tomix)}? Return on the first line, what it is called with no boilerplate, and on the second and later lines, explain what it is."
+            print("Generating...")
+            raw = run(todo)
+            name = raw.splitlines()[0]
+
+            print("\n--- Result ---")
+            print(raw)
+            print(f"\nYou now have a(n) {name}!")
+
+            # Remove used ingredients
+            for item in tomix:
+                if item in has:
+                    has.remove(item)
+
+            # Add new result
+            has.append(name)
+            continue
+        else:
+            todo = f"If you were a chef and you tried {', '.join(tomix)}, give a 1-10 score and some tips/reaction."
+            print("Generating...")
+            raw = run(todo)
+
+            print("\n--- Result ---")
+            print(tastertest(),"says:",raw)
+
+            # Remove used ingredients
+            for item in tomix:
+                if item in has:
+                    has.remove(item)
+
+            continue
+
+    print("Unknown command. Try: Buy, Mix, Cook, Taste, Other, or Quit.")
