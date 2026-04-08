@@ -1,4 +1,4 @@
-from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
+from transformers import AutoTokenizer, AutoModelForCausalLM
 import torch
 import random
 
@@ -20,43 +20,32 @@ with open("./config.txt") as f:
 
 print("Loading model:", model_name)
 
-device = "cuda" if torch.cuda.is_available() else "cpu"
-
-bnb_config = BitsAndBytesConfig(
-    load_in_4bit=True,
-    bnb_4bit_compute_dtype=torch.float16,
-    bnb_4bit_use_double_quant=True,
-    bnb_4bit_quant_type="nf4"
-)
-
-tokenizer = AutoTokenizer.from_pretrained(model_name)
+# GPTQ models load automatically with device_map="auto"
+tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
 tokenizer.pad_token = tokenizer.eos_token
 
 model = AutoModelForCausalLM.from_pretrained(
     model_name,
-    quantization_config=bnb_config,
     device_map="auto",
-    torch_dtype=torch.float16
+    trust_remote_code=True
 )
 
 model.eval()
-
 print("Done!")
 
 def run(prompt: str) -> str:
-    inputs = tokenizer(prompt, return_tensors="pt").to(device)
+    inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
 
     with torch.no_grad():
-        with torch.cuda.amp.autocast(enabled=(device=="cuda")):
-            output = model.generate(
-                **inputs,
-                max_new_tokens=120,
-                do_sample=True,
-                temperature=0.9,
-                top_p=0.95,
-                pad_token_id=tokenizer.eos_token_id,
-                eos_token_id=tokenizer.eos_token_id
-            )
+        output = model.generate(
+            **inputs,
+            max_new_tokens=120,
+            do_sample=True,
+            temperature=0.9,
+            top_p=0.95,
+            pad_token_id=tokenizer.eos_token_id,
+            eos_token_id=tokenizer.eos_token_id
+        )
 
     return tokenizer.decode(output[0], skip_special_tokens=True)
 
@@ -85,7 +74,7 @@ def choose_ingredients():
     return chosen
 
 while True:
-    print("\n=== AI Cooking  ===")
+    print("\n=== AI Cooking ===")
     print("What would you like to do?")
     print("Buy  -> Get specified ingredients")
     print("Mix  -> Mix specified ingredients")
@@ -119,7 +108,7 @@ while True:
                 print("No command given.")
                 continue
         else:
-            action = cmd  # "mix" or "cook"
+            action = cmd
 
         tomix = choose_ingredients()
         if not tomix:
@@ -127,7 +116,10 @@ while True:
             continue
 
         if cmd != "taste":
-            todo = f"What would happen if you {action} {', '.join(tomix)}? Return on the first line, what it is called with no boilerplate, and on the second and later lines, explain what it is."
+            todo = (
+                f"What would happen if you {action} {', '.join(tomix)}? "
+                f"Return on the first line what it is called, and on the next lines explain what it is."
+            )
             print("Generating...")
             raw = run(todo)
             name = raw.splitlines()[0]
@@ -136,23 +128,24 @@ while True:
             print(raw)
             print(f"\nYou now have a(n) {name}!")
 
-            # Remove used ingredients
             for item in tomix:
                 if item in has:
                     has.remove(item)
 
-            # Add new result
             has.append(name)
             continue
+
         else:
-            todo = f"If you were a chef and you tried {', '.join(tomix)}, give a 1-10 score and some tips/reaction."
+            todo = (
+                f"If you were a chef and you tried {', '.join(tomix)}, "
+                f"give a 1-10 score and some tips/reaction."
+            )
             print("Generating...")
             raw = run(todo)
 
             print("\n--- Result ---")
-            print(tastertest(),"says:",raw)
+            print(tastertest(), "says:", raw)
 
-            # Remove used ingredients
             for item in tomix:
                 if item in has:
                     has.remove(item)
