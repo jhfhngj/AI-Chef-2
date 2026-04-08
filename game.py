@@ -20,14 +20,15 @@ with open("./config.txt") as f:
 
 print("Loading model:", model_name)
 
-# GPTQ models load automatically with device_map="auto"
+model_name = "Qwen/Qwen2.5-7B-Instruct-AWQ"
+
 tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
 tokenizer.pad_token = tokenizer.eos_token
 
 model = AutoModelForCausalLM.from_pretrained(
     model_name,
-    device_map="auto",
-    trust_remote_code=True
+    device_map="auto",        # puts as much as possible on GPU
+    trust_remote_code=True    # required for Qwen models
 )
 
 model.eval()
